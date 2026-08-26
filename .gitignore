@@ -1,0 +1,12 @@
+.vs
+[Bb]uild*
+out
+TestApp
+.cache
+
+# 应用产物与敏感文件（API Key、会话记录、二进制分发包）
+qa_app/deploy/
+qa_app/config.txt
+qa_app/sessions.json*
+*.lnk
+*.log
