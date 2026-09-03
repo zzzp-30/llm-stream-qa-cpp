@@ -462,7 +462,8 @@ async function newSession(){
     const d=await r.json();
     curSessionId=d.id;curMessages=[];
     sessions.unshift({id:d.id,title:'新对话',created_at:Date.now(),message_count:0});
-    renderSbList();showWelcome();toast('新对话已创建')
+    const sb=document.getElementById('sbSearch');if(sb)sb.value='';
+    renderSbList();showWelcome();toast('新对话已创建，旧对话已存入侧边栏')
   }catch(e){toast('创建失败')}
 }
 
@@ -536,6 +537,8 @@ function renderMessages(){
 
 function showWelcome(){
   const chat=document.getElementById('chat');
+  // 先清空页面上所有旧消息气泡（旧会话内容已保存在侧边栏，可随时点回）
+  chat.querySelectorAll('.msg').forEach(m=>m.remove());
   if(!document.getElementById('welcome')){
     chat.insertAdjacentHTML('beforeend','<div class="wel" id="welcome"><div class="wel-icon"><svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 014 4v1a1 1 0 01-1 1H9a1 1 0 01-1-1V6a4 4 0 014-4z"/><rect x="4" y="9" width="16" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#fff" stroke="none"/><circle cx="15" cy="15" r="1.5" fill="#fff" stroke="none"/><path d="M10 19h4"/></svg></div><h2>你好，有什么可以帮你的？</h2><p>我是你的 AI 助手，支持多轮对话和图片分析</p><div class="grid"><div class="card" onclick="sendSug(this)"><span class="card-icon">💡</span><b>创意写作</b>帮我写一首关于春天的诗</div><div class="card" onclick="sendSug(this)"><span class="card-icon">🔍</span><b>知识解答</b>用简单的语言解释量子计算</div><div class="card" onclick="sendSug(this)"><span class="card-icon">💻</span><b>编程帮助</b>用 Python 实现快速排序</div><div class="card" onclick="sendSug(this)"><span class="card-icon">🌐</span><b>翻译</b>将"海内存知己"翻译成英文</div></div></div>')
   }
