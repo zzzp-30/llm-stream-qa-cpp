@@ -882,37 +882,44 @@ private:
             return makeJsonResponse(200, "{\"ok\":true}");
         }
         
-        // 全文搜索：在所有会话标题与消息内容中查找关键词
+        // 全文搜索：按会话分组，一个会话内多处命中合并为一条结果
         if (req.method == "GET" && req.path.rfind("/api/search", 0) == 0) {
             std::string q = getQueryParam(req.path, "q");
             json results = json::array();
             if (!q.empty()) {
                 std::lock_guard<std::mutex> lock(g_sessions_mutex);
                 for (auto& [id, s] : g_sessions) {
-                    if (results.size() >= 50) break;
+                    if (results.size() >= 30) break;
+                    json matches = json::array();
+                    int matchCount = 0;
                     // 标题匹配
-                    if (findNoCase(s.title, q) != std::string::npos) {
-                        json e;
-                        e["session_id"] = id; e["title"] = s.title;
-                        e["msg_index"] = -1; e["role"] = "title";
-                        e["snippet"] = makeSnippet(s.title, findNoCase(s.title, q), q.size(), 40);
-                        e["created_at"] = s.created_at;
-                        results.push_back(e);
+                    size_t tpos = findNoCase(s.title, q);
+                    if (tpos != std::string::npos) {
+                        json m;
+                        m["msg_index"] = -1; m["role"] = "title";
+                        m["snippet"] = makeSnippet(s.title, tpos, q.size(), 40);
+                        matches.push_back(m);
+                        matchCount++;
                     }
-                    // 消息内容匹配（每个会话最多返回3条）
-                    int perSession = 0;
-                    for (size_t i = 0; i < s.messages.size() && perSession < 3; i++) {
-                        if (results.size() >= 50) break;
+                    // 消息内容匹配（片段最多展示5条，计数统计全部）
+                    for (size_t i = 0; i < s.messages.size(); i++) {
                         size_t pos = findNoCase(s.messages[i].content, q);
                         if (pos == std::string::npos) continue;
-                        json e;
-                        e["session_id"] = id; e["title"] = s.title;
-                        e["msg_index"] = (int)i; e["role"] = s.messages[i].role;
-                        e["snippet"] = makeSnippet(s.messages[i].content, pos, q.size());
-                        e["created_at"] = s.created_at;
-                        results.push_back(e);
-                        perSession++;
+                        matchCount++;
+                        if (matches.size() < 6) {
+                            json m;
+                            m["msg_index"] = (int)i; m["role"] = s.messages[i].role;
+                            m["snippet"] = makeSnippet(s.messages[i].content, pos, q.size());
+                            matches.push_back(m);
+                        }
                     }
+                    if (matchCount == 0) continue;
+                    json e;
+                    e["session_id"] = id; e["title"] = s.title;
+                    e["created_at"] = s.created_at;
+                    e["match_count"] = matchCount;
+                    e["matches"] = matches;
+                    results.push_back(e);
                 }
                 // 按会话创建时间倒序
                 std::vector<json> v(results.begin(), results.end());
