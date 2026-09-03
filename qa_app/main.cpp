@@ -142,6 +142,74 @@ std::string utf8Truncate(const std::string& s, size_t maxChars) {
     return s.substr(0, i);
 }
 
+// URL 解码（%XX 与 +）
+std::string urlDecode(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '%' && i + 2 < s.size()) {
+            auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            int hi = hex(s[i+1]), lo = hex(s[i+2]);
+            if (hi >= 0 && lo >= 0) { out += (char)(hi * 16 + lo); i += 2; continue; }
+        }
+        out += (s[i] == '+') ? ' ' : s[i];
+    }
+    return out;
+}
+
+// 从带查询串的路径中提取参数，如 /api/search?q=xxx
+std::string getQueryParam(const std::string& path, const std::string& key) {
+    size_t qpos = path.find('?');
+    if (qpos == std::string::npos) return "";
+    std::string qs = path.substr(qpos + 1);
+    size_t start = 0;
+    while (start < qs.size()) {
+        size_t amp = qs.find('&', start);
+        std::string pair = qs.substr(start, amp == std::string::npos ? std::string::npos : amp - start);
+        size_t eq = pair.find('=');
+        if (eq != std::string::npos && pair.substr(0, eq) == key)
+            return urlDecode(pair.substr(eq + 1));
+        if (amp == std::string::npos) break;
+        start = amp + 1;
+    }
+    return "";
+}
+
+// ASCII 大小写不敏感子串查找（UTF-8 多字节字节不受影响）
+size_t findNoCase(const std::string& hay, const std::string& needle) {
+    if (needle.empty() || hay.size() < needle.size()) return std::string::npos;
+    auto low = [](char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; };
+    for (size_t i = 0; i + needle.size() <= hay.size(); i++) {
+        size_t j = 0;
+        while (j < needle.size() && low(hay[i+j]) == low(needle[j])) j++;
+        if (j == needle.size()) return i;
+    }
+    return std::string::npos;
+}
+
+// 生成匹配位置周围的 UTF-8 安全片段（前后各 radius 字节，回退到字符边界）
+std::string makeSnippet(const std::string& text, size_t pos, size_t len, size_t radius = 60) {
+    auto boundaryBack = [&](size_t p) {
+        while (p > 0 && ((unsigned char)text[p] & 0xC0) == 0x80) p--;
+        return p;
+    };
+    auto boundaryFwd = [&](size_t p) {
+        while (p < text.size() && ((unsigned char)text[p] & 0xC0) == 0x80) p++;
+        return p;
+    };
+    size_t begin = boundaryBack(pos > radius ? pos - radius : 0);
+    size_t end = boundaryFwd(std::min(text.size(), pos + len + radius));
+    // 片段内部换行替换为空格，便于侧边栏单行展示
+    std::string snip = text.substr(begin, end - begin);
+    for (auto& c : snip) if (c == '\n' || c == '\r') c = ' ';
+    return (begin > 0 ? "…" : "") + snip + (end < text.size() ? "…" : "");
+}
+
 void saveSessions() {
     // 调用者需持有 g_sessions_mutex
     json root = json::array();
@@ -812,6 +880,50 @@ private:
         if (req.method == "POST" && req.path == "/api/stop") {
             g_stop_requested = true;
             return makeJsonResponse(200, "{\"ok\":true}");
+        }
+        
+        // 全文搜索：在所有会话标题与消息内容中查找关键词
+        if (req.method == "GET" && req.path.rfind("/api/search", 0) == 0) {
+            std::string q = getQueryParam(req.path, "q");
+            json results = json::array();
+            if (!q.empty()) {
+                std::lock_guard<std::mutex> lock(g_sessions_mutex);
+                for (auto& [id, s] : g_sessions) {
+                    if (results.size() >= 50) break;
+                    // 标题匹配
+                    if (findNoCase(s.title, q) != std::string::npos) {
+                        json e;
+                        e["session_id"] = id; e["title"] = s.title;
+                        e["msg_index"] = -1; e["role"] = "title";
+                        e["snippet"] = makeSnippet(s.title, findNoCase(s.title, q), q.size(), 40);
+                        e["created_at"] = s.created_at;
+                        results.push_back(e);
+                    }
+                    // 消息内容匹配（每个会话最多返回3条）
+                    int perSession = 0;
+                    for (size_t i = 0; i < s.messages.size() && perSession < 3; i++) {
+                        if (results.size() >= 50) break;
+                        size_t pos = findNoCase(s.messages[i].content, q);
+                        if (pos == std::string::npos) continue;
+                        json e;
+                        e["session_id"] = id; e["title"] = s.title;
+                        e["msg_index"] = (int)i; e["role"] = s.messages[i].role;
+                        e["snippet"] = makeSnippet(s.messages[i].content, pos, q.size());
+                        e["created_at"] = s.created_at;
+                        results.push_back(e);
+                        perSession++;
+                    }
+                }
+                // 按会话创建时间倒序
+                std::vector<json> v(results.begin(), results.end());
+                std::sort(v.begin(), v.end(), [](const json& a, const json& b) {
+                    return a.value("created_at", 0LL) > b.value("created_at", 0LL);
+                });
+                results = json::array();
+                for (auto& e : v) results.push_back(e);
+            }
+            json j; j["query"] = q; j["results"] = results;
+            return makeJsonResponse(200, j.dump());
         }
         
         // 会话列表（按创建时间倒序）
