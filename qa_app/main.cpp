@@ -175,8 +175,13 @@ void saveSessions() {
             file.flush();
             if (!file.good()) return; // 写入失败则保留旧文件
         }
+#ifdef _WIN32
+        // MoveFileEx + REPLACE_EXISTING：替换操作本身原子，无 remove/rename 间隙
+        MoveFileExA(tmpPath.c_str(), "sessions.json", MOVEFILE_REPLACE_EXISTING);
+#else
         std::remove("sessions.json");
         std::rename(tmpPath.c_str(), "sessions.json");
+#endif
     } catch (...) {}
 }
 
