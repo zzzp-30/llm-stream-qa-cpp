@@ -10,3 +10,5 @@ api_url=https://your-api-provider.com/v1
 api_key=your-api-key-here
 model=your-text-model
 vision_model=your-vision-model
+embedding_model=text-embedding-3-small
+memory_enabled=1

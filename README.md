@@ -1,6 +1,6 @@
 # LLM Stream QA — C++ 大语言模型流式问答系统
 
-基于 C++17 与 [liboai](https://github.com/D7EAD/liboai) 的轻量级流式问答系统：C++ 手写 HTTP 服务器 + SSE 流式推送，支持多厂商模型切换、图片多模态识别与多会话管理，最终打包为免安装的 Windows 桌面应用。
+基于 C++17 与 [liboai](https://github.com/D7EAD/liboai) 的轻量级流式问答系统：C++ 手写 HTTP 服务器 + SSE 流式推送，支持多厂商模型切换、图片多模态识别、多会话管理与 **Agentic RAG 记忆检索**（检索作为工具由模型自主调用），最终打包为免安装的 Windows 桌面应用。
 
 ## 功能特性
 
@@ -8,6 +8,7 @@
 - **多模态识别**：图片输入自动路由至视觉模型（Vision API），前端自动压缩编码
 - **多会话管理**：会话隔离、消息编辑、对话重生成、生成中止，JSON 持久化（临时文件 + 原子替换），支持跨重启恢复
 - **历史全文搜索**：侧边栏搜索框实时检索所有会话的标题与消息内容，命中关键词高亮，点击结果直接跳转并定位到对应消息
+- **Agentic RAG 记忆检索**：把「检索历史记忆」封装为 OpenAI tool-calling 工具 `search_memory`，由模型**自主决定何时调用**；向量语义 + 关键词双通道 RRF 融合检索，后台异步建索引，前端实时展示检索过程卡片（详见下文专章）
 - **多厂商兼容**：配置驱动，运行时热切换任意 OpenAI 兼容 API（通义 / DeepSeek / Kimi 等）
 - **模型测试**：批量实测候选模型可用性，区分限流与真实不可用
 - **前端体验**：深色模式、语音输入、拖拽上传、Markdown/PDF 导出、代码行号高亮
@@ -39,7 +40,30 @@ liboai → libcurl → HTTPS ──→ 大模型 API
 | 会话状态层 | `Session` / `Message` | 多会话上下文、并发锁、JSON 持久化 |
 | 结果抽象层 | `StreamResult` | 流式结果与结构化错误统一封装 |
 
-模型接入层复用开源库 **liboai**（MIT 协议），本项目聚焦其上应用层的设计与实现。
+模型接入层复用开源库 **liboai**（MIT 协议），本项目聚焦其上应用层的设计与实现。为支持工具调用，对 liboai 做了**向后兼容的最小扩展**：`ChatCompletion::create` / `create_async` 追加末位可选参数 `std::optional<nlohmann::json> tools`，仅当传入非空数组时注入请求体，不影响任何现有调用点。
+
+## 记忆检索（Agentic RAG）
+
+区别于「每轮请求前无条件预取上下文」的传统 RAG，本项目把检索做成**模型可自主调用的工具**，形成 agentic 循环：模型判断问题是否需要回忆历史 → 发起 `search_memory` 工具调用 → 后端执行混合检索并回填结果 → 模型基于检索结果作答。
+
+**工具声明（MCP 风格 JSON Schema）**：`search_memory` 暴露 `query`（必填）与 `top_k`（1–10，默认 5）两个参数，随请求以 OpenAI tool-calling 格式下发。
+
+**Agentic 循环**（`callLLMStream`）：最多 `MAX_TOOL_ROUNDS = 4` 轮。每轮用带持久缓冲的状态机解析 SSE，分别累积 `delta.content`（实时逐字下发前端）与 `delta.tool_calls`（按 `index` 聚合分片的 `id` / `name` / `arguments`）。本轮若有工具调用，则把 `assistant(tool_calls)` 与每个 `role:"tool"` 结果消息追加进会话后再次请求；否则本轮内容即最终答案。token 用量跨轮累加。
+
+**混合检索**（`hybridSearch`）：
+
+| 通道 | 召回方式 | 说明 |
+|---|---|---|
+| 向量语义 | embedding 余弦相似度 | 向量 L2 归一化后点积即余弦；阈值 0.40 过滤弱相关噪声 |
+| 关键词 | 大小写不敏感子串匹配 | 精确命中，弥补向量对专有名词的召回不足 |
+
+两通道分数量纲不可比，用 **RRF（Reciprocal Rank Fusion）** 融合：`score = Σ 1/(60 + rank)`，取融合后 Top-K。
+
+**索引与降级**：以「一问一答」为一个 chunk；后台**单工作线程**串行消费索引队列，聊天主流程只入队不等待（阻塞的 embedding 网络调用全程在锁外）；向量索引 `vectors.json` 原子落盘，启动时加载并补建缺失向量。embedding 通道带**熔断降级**：连续 3 次失败则关闭向量通道 60 秒，检索自动退化为纯关键词，冷却后重试。编辑 / 重生成 / 删除 / 清空会话时同步失效对应向量。
+
+**前端可视化**：模型发起检索时，AI 气泡内实时插入状态卡片——`tool_event:start` 显示转圈的「正在检索记忆：{query}」，`tool_event:end` 变为绿色「已检索记忆，命中 N 条 / 无相关结果」；历史重绘后卡片会重新注入本轮气泡，保证可见。
+
+**开关**：仅当 `memory_enabled=1` 且非图片场景时启用工具（视觉模型通常不支持 tool-calling）；可在页面「⚙️ API 设置」中开关记忆检索并配置 embedding 模型。
 
 ## 项目结构
 
@@ -78,6 +102,15 @@ qa_app.exe
 2. 启动后自动打开浏览器（默认 `http://localhost:8080`）；
 3. 也可在页面内通过"模型选择器"切换模型，配置会热更新并落盘。
 
+`config.txt` 关键项：
+
+| 键 | 默认值 | 说明 |
+|---|---|---|
+| `api_url` / `api_key` | — | OpenAI 兼容接口地址与密钥 |
+| `model` / `vision_model` | `gpt-3.5-turbo` / `gpt-4o` | 文本模型 / 图片识别用的视觉模型 |
+| `embedding_model` | `text-embedding-3-small` | 记忆检索用的 embedding 模型 |
+| `memory_enabled` | `1` | 记忆检索（Agentic RAG）总开关，`0` 关闭 |
+
 ## 部署到其他电脑（免安装）
 
 目标电脑要求：Windows 10/11 x64，**无需安装任何运行环境**。
@@ -90,7 +123,7 @@ qa_app.exe
 2. 在目标电脑上编辑 `config.txt`，填入 API 地址与密钥；
 3. 双击 `qa_app.exe`，浏览器自动打开 `http://localhost:8080`（若未自动打开，手动访问即可）。
 
-> 如需重新生成分发包：在本机运行 `qa_app/package.bat`，会自动收集 exe 与全部依赖 DLL 到 deploy 目录。
+> 如需重新生成分发包：在本机运行 `qa_app/package.bat`，会自动收集 exe 与全部依赖 DLL 到 deploy 目录。`sessions.json`（聊天历史）与 `vectors.json`（记忆索引）属运行期用户数据，**不随包分发**，首次运行自动创建。
 >
 > 局域网访问：服务器监听所有网卡，只需在 Windows 防火墙放行 8080 端口，同一 WiFi 下手机即可访问 `http://<电脑IP>:8080`。
 
@@ -98,12 +131,13 @@ qa_app.exe
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/chat` | 流式对话（SSE），支持 send/regenerate/edit 动作 |
+| POST | `/api/chat` | 流式对话（SSE），支持 send/regenerate/edit 动作；SSE 除 `delta`/`usage` 外还推送 `tool_event`（记忆检索开始/结束）|
 | GET/POST | `/api/sessions` | 会话列表 / 创建会话 |
-| GET/DELETE | `/api/sessions/{id}` | 会话详情 / 删除会话 |
+| GET/DELETE | `/api/sessions/{id}` | 会话详情 / 删除会话（同步清理其向量）|
 | POST | `/api/stop` | 中止当前生成 |
 | GET | `/api/search?q=关键词` | 全文搜索所有会话标题与消息内容，返回匹配片段与消息定位 |
-| GET/POST | `/api/config` | 读取 / 更新模型配置 |
+| GET | `/api/debug/search?q=&top_k=` | 记忆检索调试接口，返回混合检索命中、向量通道是否生效与索引规模 |
+| GET/POST | `/api/config` | 读取 / 更新模型配置（含 `embedding_model`、`memory_enabled`）|
 | POST | `/api/test-models` | 批量测试模型可用性 |
 
 ## 致谢

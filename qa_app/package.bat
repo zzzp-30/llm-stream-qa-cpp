@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul 2>&1
 echo ========================================
-echo   AI Assistant - æ‰“åŒ…éƒ¨ç½²è„šæœ¬
+echo   AI Assistant - ´ò°ü²¿Êð½Å±¾
 echo ========================================
 echo.
 
@@ -9,67 +9,47 @@ set BUILD_DIR=%~dp0build
 set DEPLOY_DIR=%~dp0deploy
 set MSYS=C:\msys64\ucrt64\bin
 
-:: æ¸…ç†å¹¶åˆ›å»ºéƒ¨ç½²ç›®å½•
+:: ÇåÀí²¢´´½¨²¿ÊðÄ¿Â¼
 if exist "%DEPLOY_DIR%" rmdir /s /q "%DEPLOY_DIR%"
 mkdir "%DEPLOY_DIR%\web"
 
-:: å¤åˆ¶ä¸»ç¨‹åº
-echo [1/4] å¤åˆ¶ä¸»ç¨‹åº...
+:: ¸´ÖÆÖ÷³ÌÐò
+echo [1/4] ¸´ÖÆÖ÷³ÌÐò...
 copy "%BUILD_DIR%\qa_app.exe" "%DEPLOY_DIR%\" >nul
 
-:: å¤åˆ¶ web å‰ç«¯
-echo [2/4] å¤åˆ¶ Web å‰ç«¯...
-xcopy "%BUILD_DIR%\web\*" "%DEPLOY_DIR%\web\" /E /Y /Q >nul
+:: ¸´ÖÆ web Ç°¶Ë£¨´ÓÔ´ÂëÄ¿Â¼¸´ÖÆ£¬±ÜÃâÒÀÀµ build ÏÂµÄÉú³É¸±±¾£©
+echo [2/4] ¸´ÖÆ Web Ç°¶Ë...
+xcopy "%~dp0web\*" "%DEPLOY_DIR%\web\" /E /Y /Q >nul
 
-:: å¤åˆ¶é…ç½®æ–‡ä»¶
-echo [3/4] å¤åˆ¶é…ç½®æ–‡ä»¶...
+:: ¸´ÖÆÅäÖÃÎÄ¼þ
+echo [3/4] ¸´ÖÆÅäÖÃÎÄ¼þ...
 if exist "%BUILD_DIR%\config.txt" (
     copy "%BUILD_DIR%\config.txt" "%DEPLOY_DIR%\" >nul
 ) else (
-    echo # AI Assistant é…ç½®æ–‡ä»¶> "%DEPLOY_DIR%\config.txt"
+    echo # AI Assistant ÅäÖÃÎÄ¼þ> "%DEPLOY_DIR%\config.txt"
     echo api_url=https://api.openai.com/v1>> "%DEPLOY_DIR%\config.txt"
     echo api_key=YOUR_KEY_HERE>> "%DEPLOY_DIR%\config.txt"
     echo model=gpt-3.5-turbo>> "%DEPLOY_DIR%\config.txt"
     echo vision_model=gpt-4o>> "%DEPLOY_DIR%\config.txt"
-    echo     å·²åˆ›å»ºç¤ºä¾‹ config.txtï¼Œè¯·å¡«å†™ API Key
+    echo embedding_model=text-embedding-3-small>> "%DEPLOY_DIR%\config.txt"
+    echo memory_enabled=1>> "%DEPLOY_DIR%\config.txt"
+    echo     ÒÑ´´½¨Ê¾Àý config.txt£¬ÇëÌîÐ´ API Key
 )
 
-:: å¤åˆ¶ä¾èµ– DLLï¼ˆä½¿ç”¨é€šé…ç¬¦åŒ¹é…ï¼Œä¸æ€•ç‰ˆæœ¬å·å˜åŒ–ï¼‰
-echo [4/4] å¤åˆ¶ä¾èµ– DLL...
-for %%f in (
-    libcurl-4*.dll
-    libcrypto-3*.dll
-    libssl-3*.dll
-    libgcc_s_seh-1*.dll
-    libstdc++-6*.dll
-    libwinpthread-1*.dll
-    libiconv-2*.dll
-    libintl-8*.dll
-    libidn2-0*.dll
-    libunistring*.dll
-    libbrotlicommon*.dll
-    libbrotlidec*.dll
-    libnghttp2-14*.dll
-    libnghttp3*.dll
-    libngtcp2-16*.dll
-    libngtcp2_crypto_ossl*.dll
-    libpsl-5*.dll
-    libssh2-1*.dll
-    libzstd*.dll
-    zlib1*.dll
-) do (
-    if exist "%MSYS%\%%f" (
-        copy "%MSYS%\%%f" "%DEPLOY_DIR%\" >nul
-    )
-)
+:: NOTE: sessions.json / vectors.json are runtime user data (chat history and
+:: memory index). They are intentionally NOT packaged; created on first run.
+
+:: ¸´ÖÆÒÀÀµ DLL£¨Ê¹ÓÃÍ¨Åä·ûÆ¥Åä£¬²»ÅÂ°æ±¾ºÅ±ä»¯£©
+echo [4/4] ¸´ÖÆÒÀÀµ DLL...
+for %%f in (libcurl-4*.dll libcrypto-3*.dll libssl-3*.dll libgcc_s_seh-1*.dll libstdc++-6*.dll libwinpthread-1*.dll libiconv-2*.dll libintl-8*.dll libidn2-0*.dll libunistring*.dll libbrotlicommon*.dll libbrotlidec*.dll libnghttp2-14*.dll libnghttp3*.dll libngtcp2-16*.dll libngtcp2_crypto_ossl*.dll libpsl-5*.dll libssh2-1*.dll libzstd*.dll zlib1*.dll) do if exist "%MSYS%\%%f" copy "%MSYS%\%%f" "%DEPLOY_DIR%\" >nul
 
 echo.
 echo ========================================
-echo   æ‰“åŒ…å®Œæˆï¼
-echo   è¾“å‡ºç›®å½•: %DEPLOY_DIR%
+echo   ´ò°üÍê³É£¡
+echo   Êä³öÄ¿Â¼: %DEPLOY_DIR%
 echo.
-echo   éƒ¨ç½²æ–¹å¼: å°†æ•´ä¸ª deploy æ–‡ä»¶å¤¹å¤åˆ¶åˆ°
-echo   ä»»æ„ä½ç½®ï¼ŒåŒå‡» qa_app.exe å³å¯è¿è¡Œã€‚
-echo   é¦–æ¬¡ä½¿ç”¨è¯·å…ˆç¼–è¾‘ config.txt å¡«å†™ API Keyã€‚
+echo   ²¿Êð·½Ê½: ½«Õû¸ö deploy ÎÄ¼þ¼Ð¸´ÖÆµ½
+echo   ÈÎÒâÎ»ÖÃ£¬Ë«»÷ qa_app.exe ¼´¿ÉÔËÐÐ¡£
+echo   Ê×´ÎÊ¹ÓÃÇëÏÈ±à¼­ config.txt ÌîÐ´ API Key¡£
 echo ========================================
 pause

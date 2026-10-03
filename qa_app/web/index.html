@@ -212,6 +212,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .fg label{display:block;font-size:12px;color:var(--txt2);margin-bottom:5px;font-weight:600;letter-spacing:.3px}
 .fg input{width:100%;padding:10px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface2);color:var(--txt);font-size:13px;outline:none;transition:all .2s}
 .fg input:focus{border-color:var(--pri);background:var(--surface);box-shadow:0 0 0 3px rgba(99,102,241,.08)}
+.fg label.ckrow{display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;line-height:1.4}
+.fg label.ckrow input{width:auto;margin:0;flex:0 0 auto}
+.toolwrap{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.toolchip{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:4px 11px;border-radius:999px;background:rgba(99,102,241,.1);color:#6366f1;font-size:12px;font-weight:600;border:1px solid rgba(99,102,241,.25);animation:fadeUp .25s ease}
+.toolchip .sp{width:11px;height:11px;border:2px solid rgba(99,102,241,.3);border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite}
+.toolchip.done{background:rgba(16,185,129,.1);color:#059669;border-color:rgba(16,185,129,.25)}
+@keyframes spin{to{transform:rotate(360deg)}}
 .mas{display:flex;gap:8px;margin-top:22px;justify-content:flex-end}
 .mas .hb{padding:9px 22px;font-size:13px;border-color:var(--border);background:var(--surface2);color:var(--txt)}
 .mas .hb:hover{background:var(--border)}
@@ -358,6 +365,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
     <h3>⚙️ API 设置</h3>
     <div class="fg"><label>API Base URL</label><input id="cUrl" placeholder="https://api.openai.com/v1"></div>
     <div class="fg"><label>API Key</label><input id="cKey" type="password" placeholder="sk-..."></div>
+    <div class="fg"><label>Embedding 模型（记忆检索用）</label><input id="cEmb" placeholder="text-embedding-3-small"></div>
+    <div class="fg"><label class="ckrow"><input id="cMem" type="checkbox"> 开启历史记忆检索（RAG · 模型可自主调用 search_memory 工具）</label></div>
     <div class="mas">
       <button class="hb" onclick="closeCfg()">取消</button>
       <button class="hb pri" onclick="saveCfg()">保存</button>
@@ -402,9 +411,9 @@ function setStatus(ok){
   document.getElementById('sTxt').textContent=ok?(cfg.model||'LLM'):'未连接';
   document.getElementById('modelTagText').textContent=cfg.model||'选择模型';
 }
-function openCfg(){document.getElementById('cUrl').value=cfg.url;document.getElementById('cKey').value=cfg.key;document.getElementById('cfgModal').classList.add('show')}
+function openCfg(){document.getElementById('cUrl').value=cfg.url;document.getElementById('cKey').value=cfg.key;document.getElementById('cEmb').value=cfg.embedding_model||'';document.getElementById('cMem').checked=!!cfg.memory_enabled;document.getElementById('cfgModal').classList.add('show')}
 function closeCfg(){document.getElementById('cfgModal').classList.remove('show')}
-async function saveCfg(){const n={url:document.getElementById('cUrl').value.trim(),key:document.getElementById('cKey').value.trim(),model:cfg.model,vision_model:cfg.vision_model};if(!n.key){toast('API Key 不能为空');return}try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(n)});if(r.ok){cfg=n;setStatus(true);closeCfg();toast('设置已保存 ✓')}}catch(e){toast('网络错误')}}
+async function saveCfg(){const n={url:document.getElementById('cUrl').value.trim(),key:document.getElementById('cKey').value.trim(),model:cfg.model,vision_model:cfg.vision_model,embedding_model:document.getElementById('cEmb').value.trim()||cfg.embedding_model,memory_enabled:document.getElementById('cMem').checked};if(!n.key){toast('API Key 不能为空');return}try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(n)});if(r.ok){cfg=Object.assign({},cfg,n);setStatus(true);closeCfg();toast('设置已保存 ✓')}}catch(e){toast('网络错误')}}
 
 // ============ 主题 ============
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('themeBtn').textContent=t==='dark'?'☀️ 浅色':'🌙 深色';localStorage.setItem('theme',t)}
@@ -698,29 +707,38 @@ async function doChat(opts){
     renderMessages()
   }
   const msgDiv=createAiMsg();const bubble=msgDiv.querySelector('.bbl');
-  let full='',tokenInfo=null,stopped=false,errMsg=null;
+  let full='',tokenInfo=null,stopped=false,errMsg=null,savedTools='',liveChip=null;
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:opts.message||'',session_id:curSessionId,action:opts.action,edit_index:opts.edit_index??-1,web_search:webSearch,image:opts.image?{data:opts.image.data,mime_type:opts.image.mime_type}:null})});
     if(!res.ok)throw new Error('请求失败 ('+res.status+')');
+    const toolsWrap=document.createElement('div');toolsWrap.className='toolwrap';
     const streamEl=document.createElement('div');streamEl.style.cssText='white-space:pre-wrap;min-height:1em;';
-    bubble.innerHTML='';bubble.appendChild(streamEl);
+    bubble.innerHTML='';bubble.appendChild(toolsWrap);bubble.appendChild(streamEl);
     const cursorEl=document.createElement('span');cursorEl.className='cur';streamEl.appendChild(cursorEl);
     const reader=res.body.getReader();const decoder=new TextDecoder();let buf='';
     while(true){const{done,value}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop();
     for(const line of lines){if(!line.startsWith('data: '))continue;const data=line.slice(6).trim();if(data==='[DONE]')continue;
-    try{const j=JSON.parse(data);if(j.delta){full+=j.delta;streamEl.textContent=full;streamEl.appendChild(cursorEl);scrollBottom()}if(j.usage)tokenInfo=j.usage;if(j.stopped)stopped=true;if(j.error)errMsg=j.error}catch(e){if(e.message&&!e.message.includes('JSON'))throw e}}}
+    try{const j=JSON.parse(data);
+      if(j.delta){full+=j.delta;streamEl.textContent=full;streamEl.appendChild(cursorEl);scrollBottom()}
+      else if(j.tool_event==='start'){liveChip=document.createElement('div');liveChip.className='toolchip';const q=(j.args&&j.args.query)?String(j.args.query):'';liveChip.innerHTML='<span class="sp"></span>正在检索记忆'+(q?'：'+esc(q.length>30?q.slice(0,30)+'…':q):'');toolsWrap.appendChild(liveChip);scrollBottom()}
+      else if(j.tool_event==='end'){if(!liveChip){liveChip=document.createElement('div');liveChip.className='toolchip';toolsWrap.appendChild(liveChip)}liveChip.classList.add('done');liveChip.innerHTML='🔎 '+(j.count>0?('已检索记忆，命中 '+j.count+' 条'):'已检索记忆，无相关结果');liveChip=null;scrollBottom()}
+      if(j.usage)tokenInfo=j.usage;if(j.stopped)stopped=true;if(j.error)errMsg=j.error}catch(e){if(e.message&&!e.message.includes('JSON'))throw e}}}
     cursorEl.remove();
-    if(errMsg){bubble.innerHTML=`<span style="color:#ef4444">⚠️ ${esc(errMsg)}</span>`}
+    if(liveChip){liveChip.classList.add('done');liveChip.innerHTML='🔎 记忆检索已中断';liveChip=null}
+    savedTools=toolsWrap.innerHTML;
+    if(errMsg){bubble.innerHTML=savedTools+`<span style="color:#ef4444">⚠️ ${esc(errMsg)}</span>`}
     else{
       if(stopped)full+='\n\n*[生成已停止]*';
-      bubble.innerHTML=full?fmtMd(full):'<span style="color:var(--txt3)">（无内容）</span>';
+      bubble.innerHTML=savedTools+(full?fmtMd(full):'<span style="color:var(--txt3)">（无内容）</span>');
       enhanceCode(bubble);
       appendAiActs(bubble,full,tokenInfo?tokenInfo.total_tokens:0,true)
     }
   }catch(e){bubble.innerHTML=`<span style="color:#ef4444">⚠️ ${esc(e.message)}</span>`}
   finally{
     loading=false;setSendBtn(false);document.getElementById('inp').focus();
-    await refreshSessionState()
+    await refreshSessionState();
+    // refreshSessionState 会按后端历史整体重绘，气泡里的工具卡片会丢失；此处重新注入到本轮 AI 气泡
+    if(savedTools){const ais=document.querySelectorAll('#chat .msg.ai');const last=ais[ais.length-1];if(last){const bbl=last.querySelector('.bbl');if(bbl&&!bbl.querySelector('.toolwrap'))bbl.insertAdjacentHTML('afterbegin','<div class="toolwrap">'+savedTools+'</div>')}}
   }
 }
 
