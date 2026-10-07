@@ -214,10 +214,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .fg input:focus{border-color:var(--pri);background:var(--surface);box-shadow:0 0 0 3px rgba(99,102,241,.08)}
 .fg label.ckrow{display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;line-height:1.4}
 .fg label.ckrow input{width:auto;margin:0;flex:0 0 auto}
-.toolwrap{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
-.toolchip{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:4px 11px;border-radius:999px;background:rgba(99,102,241,.1);color:#6366f1;font-size:12px;font-weight:600;border:1px solid rgba(99,102,241,.25);animation:fadeUp .25s ease}
-.toolchip .sp{width:11px;height:11px;border:2px solid rgba(99,102,241,.3);border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite}
-.toolchip.done{background:rgba(16,185,129,.1);color:#059669;border-color:rgba(16,185,129,.25)}
+.toolwrap{display:flex;flex-direction:column;gap:2px;margin-bottom:10px;padding:7px 11px;border-left:2px solid var(--border2);background:var(--surface2);border-radius:0 8px 8px 0;animation:fadeUp .25s ease}
+.toolwrap:empty{display:none}
+.think-line{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--txt3);line-height:1.6}
+.think-line .sp{width:9px;height:9px;border:1.5px solid rgba(99,102,241,.3);border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+.think-line .q{color:var(--txt2)}
+.think-line.done .ic{color:#059669;font-weight:700}
 @keyframes spin{to{transform:rotate(360deg)}}
 .mas{display:flex;gap:8px;margin-top:22px;justify-content:flex-end}
 .mas .hb{padding:9px 22px;font-size:13px;border-color:var(--border);background:var(--surface2);color:var(--txt)}
@@ -225,23 +227,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
 .hb.pri{background:var(--user-bg);color:#fff;border-color:transparent}
 .hb.pri:hover{opacity:.9;box-shadow:0 2px 8px rgba(99,102,241,.3)}
 
-/* Model Picker - 底部弹出 */
-.mpov{position:fixed;inset:0;background:rgba(0,0,0,.3);backdrop-filter:blur(4px);z-index:90;display:none;align-items:flex-end;justify-content:center}
-.mpov.show{display:flex}
-.mpanel{background:var(--surface);border-radius:20px 20px 0 0;padding:20px 20px 30px;width:100%;max-width:780px;box-shadow:0 -4px 30px rgba(0,0,0,.12);animation:slideUp .3s cubic-bezier(.16,1,.3,1);max-height:60vh;overflow-y:auto}
-@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
-.mpanel .mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.mpanel .mhead h3{font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px}
-.mpanel .mhead .close-btn{width:30px;height:30px;border-radius:8px;border:none;background:var(--surface2);cursor:pointer;font-size:16px;color:var(--txt2);display:flex;align-items:center;justify-content:center;transition:all .2s}
-.mpanel .mhead .close-btn:hover{background:var(--border);color:var(--txt)}
-.mpanel h4{font-size:12px;font-weight:600;color:var(--txt2);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.5px}
-.mlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
-.mopt{padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);cursor:pointer;text-align:left;transition:all .15s;position:relative}
-.mopt:hover{border-color:var(--pri);background:var(--pri-bg)}
-.mopt.active{border-color:var(--pri);background:var(--pri-bg)}
-.mopt.active::after{content:'✓';position:absolute;top:8px;right:10px;color:var(--pri);font-weight:700;font-size:13px}
-.mopt b{display:block;font-size:13px;color:var(--txt);margin-bottom:2px}
-.mopt span{font-size:11px;color:var(--txt3)}
 .tst{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-10px);padding:10px 24px;border-radius:10px;background:var(--txt);color:var(--surface);font-size:13px;z-index:200;opacity:0;transition:all .3s cubic-bezier(.16,1,.3,1);pointer-events:none;box-shadow:var(--sh-l);font-weight:500}
 .tst.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
@@ -289,7 +274,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
     </button>
     <div class="hdr-logo"><svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 014 4v1a1 1 0 01-1 1H9a1 1 0 01-1-1V6a4 4 0 014-4z"/><path d="M9 7V6a3 3 0 116 0v1"/><rect x="4" y="9" width="16" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#fff" stroke="none"/><circle cx="15" cy="15" r="1.5" fill="#fff" stroke="none"/><path d="M10 19h4"/></svg></div>
-    <div class="hdr-info" onclick="openModelPicker()" style="cursor:pointer" title="点击切换模型">
+    <div class="hdr-info" onclick="openCfg()" style="cursor:pointer" title="点击设置模型 / API">
       <h1>AI 助手</h1>
       <p><span class="dot" id="sDot"></span><span id="sTxt">连接中...</span></p>
     </div>
@@ -333,9 +318,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
       </div>
       <div id="iprev"></div>
       <div class="irow2">
-        <div class="model-tag" onclick="openModelPicker()" title="点击切换模型">
+        <div class="model-tag" onclick="openCfg()" title="点击设置模型 / API">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 014 4v1a1 1 0 01-1 1H9a1 1 0 01-1-1V6a4 4 0 014-4z"/><rect x="4" y="9" width="16" height="12" rx="3"/></svg>
-          <span id="modelTagText">选择模型</span>
+          <span id="modelTagText">未设置模型</span>
         </div>
         <div class="web-tgl" id="webTgl" onclick="toggleWeb()" title="开启后 AI 将结合联网信息回答">
           <span class="wt-dot"></span><span id="webTglTxt">🔍 联网搜索</span>
@@ -365,22 +350,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hira
     <h3>⚙️ API 设置</h3>
     <div class="fg"><label>API Base URL</label><input id="cUrl" placeholder="https://api.openai.com/v1"></div>
     <div class="fg"><label>API Key</label><input id="cKey" type="password" placeholder="sk-..."></div>
+    <div class="fg"><label>对话模型名称（直接粘贴，如 gemini-2.5-flash-lite）</label><input id="cModel" placeholder="粘贴模型名称"></div>
+    <div class="fg"><label>视觉模型名称（图片识别用，可留空）</label><input id="cVision" placeholder="粘贴模型名称"></div>
     <div class="fg"><label>Embedding 模型（记忆检索用）</label><input id="cEmb" placeholder="text-embedding-3-small"></div>
     <div class="fg"><label class="ckrow"><input id="cMem" type="checkbox"> 开启历史记忆检索（RAG · 模型可自主调用 search_memory 工具）</label></div>
     <div class="mas">
       <button class="hb" onclick="closeCfg()">取消</button>
       <button class="hb pri" onclick="saveCfg()">保存</button>
     </div>
-  </div>
-</div>
-
-<div class="mpov" id="modelPicker" onclick="if(event.target===this)closeModelPicker()">
-  <div class="mpanel">
-    <div class="mhead">
-      <h3>🤖 选择模型</h3>
-      <button class="close-btn" onclick="closeModelPicker()">×</button>
-    </div>
-    <div id="modelListContent"><p style="color:var(--txt3);font-size:13px">加载中...</p></div>
   </div>
 </div>
 
@@ -405,46 +382,19 @@ const TPLS=[
 ];
 
 // ============ 配置 ============
-async function loadCfg(){try{const r=await fetch('/api/config');if(r.ok){cfg=await r.json();setStatus(true)}loadModels()}catch(e){setStatus(false)}}
+async function loadCfg(){try{const r=await fetch('/api/config');if(r.ok){cfg=await r.json();setStatus(true)}}catch(e){setStatus(false)}}
 function setStatus(ok){
   document.getElementById('sDot').className=ok?'dot':'dot err';
   document.getElementById('sTxt').textContent=ok?(cfg.model||'LLM'):'未连接';
-  document.getElementById('modelTagText').textContent=cfg.model||'选择模型';
+  document.getElementById('modelTagText').textContent=cfg.model||'未设置模型';
 }
-function openCfg(){document.getElementById('cUrl').value=cfg.url;document.getElementById('cKey').value=cfg.key;document.getElementById('cEmb').value=cfg.embedding_model||'';document.getElementById('cMem').checked=!!cfg.memory_enabled;document.getElementById('cfgModal').classList.add('show')}
+function openCfg(){document.getElementById('cUrl').value=cfg.url;document.getElementById('cKey').value=cfg.key;document.getElementById('cModel').value=cfg.model||'';document.getElementById('cVision').value=cfg.vision_model||'';document.getElementById('cEmb').value=cfg.embedding_model||'';document.getElementById('cMem').checked=!!cfg.memory_enabled;document.getElementById('cfgModal').classList.add('show')}
 function closeCfg(){document.getElementById('cfgModal').classList.remove('show')}
-async function saveCfg(){const n={url:document.getElementById('cUrl').value.trim(),key:document.getElementById('cKey').value.trim(),model:cfg.model,vision_model:cfg.vision_model,embedding_model:document.getElementById('cEmb').value.trim()||cfg.embedding_model,memory_enabled:document.getElementById('cMem').checked};if(!n.key){toast('API Key 不能为空');return}try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(n)});if(r.ok){cfg=Object.assign({},cfg,n);setStatus(true);closeCfg();toast('设置已保存 ✓')}}catch(e){toast('网络错误')}}
+async function saveCfg(){const model=document.getElementById('cModel').value.trim();const n={url:document.getElementById('cUrl').value.trim(),key:document.getElementById('cKey').value.trim(),model:model||cfg.model,vision_model:document.getElementById('cVision').value.trim(),embedding_model:document.getElementById('cEmb').value.trim()||cfg.embedding_model,memory_enabled:document.getElementById('cMem').checked};if(!n.key){toast('API Key 不能为空');return}if(!n.model){toast('请填写模型名称');return}try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(n)});if(r.ok){cfg=Object.assign({},cfg,n);setStatus(true);closeCfg();toast('设置已保存 ✓')}}catch(e){toast('网络错误')}}
 
 // ============ 主题 ============
 function applyTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('themeBtn').textContent=t==='dark'?'☀️ 浅色':'🌙 深色';localStorage.setItem('theme',t)}
 function toggleTheme(){applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')}
-
-// ============ 模型选择 ============
-let modelData={chat:[],reason:[],vision:[]};
-async function loadModels(){try{const r=await fetch('/api/models');if(r.ok){modelData=await r.json()}}catch(e){}}
-function openModelPicker(){document.getElementById('modelPicker').classList.add('show');renderModelList()}
-function closeModelPicker(){document.getElementById('modelPicker').classList.remove('show')}
-function renderModelList(){
-  let html='';
-  const groups=[{key:'chat',label:'💬 对话模型'},{key:'reason',label:'🧠 推理模型'},{key:'vision',label:'👁️ 视觉模型'}];
-  for(const g of groups){
-    const models=modelData[g.key]||[];
-    if(!models.length)continue;
-    html+=`<h4>${g.label}</h4><div class="mlist">`;
-    for(const m of models){
-      const active=(g.key==='vision'&&cfg.vision_model===m.id)||(g.key!=='vision'&&cfg.model===m.id)?'active':'';
-      html+=`<div class="mopt ${active}" onclick="selectModel('${m.id}','${g.key}')"><b>${m.name}</b><span>${m.desc}</span></div>`;
-    }
-    html+='</div>';
-  }
-  document.getElementById('modelListContent').innerHTML=html
-}
-async function selectModel(id,group){
-  if(group==='vision'){cfg.vision_model=id}else{cfg.model=id}
-  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:cfg.url,key:cfg.key,model:cfg.model,vision_model:cfg.vision_model})});
-  setStatus(true);renderModelList();
-  toast('已切换到 ' + id)
-}
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 
@@ -720,11 +670,11 @@ async function doChat(opts){
     for(const line of lines){if(!line.startsWith('data: '))continue;const data=line.slice(6).trim();if(data==='[DONE]')continue;
     try{const j=JSON.parse(data);
       if(j.delta){full+=j.delta;streamEl.textContent=full;streamEl.appendChild(cursorEl);scrollBottom()}
-      else if(j.tool_event==='start'){liveChip=document.createElement('div');liveChip.className='toolchip';const q=(j.args&&j.args.query)?String(j.args.query):'';liveChip.innerHTML='<span class="sp"></span>正在检索记忆'+(q?'：'+esc(q.length>30?q.slice(0,30)+'…':q):'');toolsWrap.appendChild(liveChip);scrollBottom()}
-      else if(j.tool_event==='end'){if(!liveChip){liveChip=document.createElement('div');liveChip.className='toolchip';toolsWrap.appendChild(liveChip)}liveChip.classList.add('done');liveChip.innerHTML='🔎 '+(j.count>0?('已检索记忆，命中 '+j.count+' 条'):'已检索记忆，无相关结果');liveChip=null;scrollBottom()}
+      else if(j.tool_event==='start'){const isWeb=j.tool==='web_search';const label=isWeb?'联网搜索':'记忆检索';const icon=isWeb?'🌐':'🧠';const q=(j.args&&j.args.query)?String(j.args.query):'';liveChip=document.createElement('div');liveChip.className='think-line';liveChip.innerHTML='<span class="sp"></span><span>'+icon+' 正在'+label+(q?'：<span class="q">'+esc(q.length>40?q.slice(0,40)+'…':q)+'</span>':'')+'</span>';toolsWrap.appendChild(liveChip);scrollBottom()}
+      else if(j.tool_event==='end'){const isWeb=j.tool==='web_search';const label=isWeb?'联网搜索':'记忆检索';const icon=isWeb?'🌐':'🧠';const q=j.query?String(j.query):'';if(!liveChip){liveChip=document.createElement('div');liveChip.className='think-line';toolsWrap.appendChild(liveChip)}liveChip.classList.add('done');liveChip.innerHTML='<span class="ic">✓</span><span>'+icon+' '+label+(q?'「'+esc(q.length>40?q.slice(0,40)+'…':q)+'」':'')+' · '+(j.count>0?(j.count+' 条结果'):'无结果')+'</span>';liveChip=null;scrollBottom()}
       if(j.usage)tokenInfo=j.usage;if(j.stopped)stopped=true;if(j.error)errMsg=j.error}catch(e){if(e.message&&!e.message.includes('JSON'))throw e}}}
     cursorEl.remove();
-    if(liveChip){liveChip.classList.add('done');liveChip.innerHTML='🔎 记忆检索已中断';liveChip=null}
+    if(liveChip){liveChip.classList.add('done');liveChip.innerHTML='<span class="ic">✓</span><span>检索已中断</span>';liveChip=null}
     savedTools=toolsWrap.innerHTML;
     if(errMsg){bubble.innerHTML=savedTools+`<span style="color:#ef4444">⚠️ ${esc(errMsg)}</span>`}
     else{
@@ -733,9 +683,12 @@ async function doChat(opts){
       enhanceCode(bubble);
       appendAiActs(bubble,full,tokenInfo?tokenInfo.total_tokens:0,true)
     }
-  }catch(e){bubble.innerHTML=`<span style="color:#ef4444">⚠️ ${esc(e.message)}</span>`}
+  }catch(e){errMsg=e.message||'请求失败';bubble.innerHTML=`<span style="color:#ef4444">⚠️ ${esc(errMsg)}</span>`}
   finally{
     loading=false;setSendBtn(false);document.getElementById('inp').focus();
+    // 出错时后端不落库，refreshSessionState 的整体重绘会把用户气泡与错误提示一并冲掉，
+    // 表现为“发了消息什么都没发生”。此时保留乐观渲染的错误，让用户看清失败原因。
+    if(errMsg)return;
     await refreshSessionState();
     // refreshSessionState 会按后端历史整体重绘，气泡里的工具卡片会丢失；此处重新注入到本轮 AI 气泡
     if(savedTools){const ais=document.querySelectorAll('#chat .msg.ai');const last=ais[ais.length-1];if(last){const bbl=last.querySelector('.bbl');if(bbl&&!bbl.querySelector('.toolwrap'))bbl.insertAdjacentHTML('afterbegin','<div class="toolwrap">'+savedTools+'</div>')}}

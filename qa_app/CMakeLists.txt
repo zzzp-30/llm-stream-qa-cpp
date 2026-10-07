@@ -26,9 +26,9 @@ endif()
 # 链接库（oai 会自动传递 include 路径和依赖）
 target_link_libraries(qa_app PRIVATE oai)
 
-# Windows 下链接 WinSock2, Crypt32, Shell32, User32
+# Windows 下链接 WinSock2, Crypt32, Shell32, User32, WinHTTP（联网搜索用）
 if(WIN32)
-    target_link_libraries(qa_app PRIVATE ws2_32 crypt32 shell32 user32)
+    target_link_libraries(qa_app PRIVATE ws2_32 crypt32 shell32 user32 winhttp)
     # MinGW 需要设置 GUI 子系统
     if(MINGW)
         target_link_options(qa_app PRIVATE -Wl,--subsystem,windows)

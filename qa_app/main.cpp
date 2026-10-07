@@ -20,9 +20,11 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <winhttp.h>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "winhttp.lib")
 typedef SOCKET socket_t;
 #define INVALID_SOCK INVALID_SOCKET
 #define CLOSE_SOCKET closesocket
@@ -709,7 +711,7 @@ void sendSseEvent(socket_t sock, const std::string& data) {
 // 用 OpenAI tool-calling 的 JSON Schema 声明可被模型调用的工具。
 // 当前暴露一个工具 search_memory：对历史会话记忆做混合语义检索（agentic RAG）。
 // 检索本身即“工具”，由模型自主决定何时调用，而非在每轮请求前无条件预取。
-static json buildToolsSchema() {
+static json buildToolsSchema(bool memoryEnabled, bool webEnabled) {
     json searchMemory = {
         {"type", "function"},
         {"function", {
@@ -725,7 +727,25 @@ static json buildToolsSchema() {
             }}
         }}
     };
-    return json::array({searchMemory});
+    json webSearch = {
+        {"type", "function"},
+        {"function", {
+            {"name", "web_search"},
+            {"description", "从互联网实时搜索最新信息。当问题涉及新闻、天气、股价、体育赛事、科技动态等需要实时数据的内容时调用。"},
+            {"parameters", {
+                {"type", "object"},
+                {"properties", {
+                    {"query", {{"type", "string"}, {"description", "搜索查询词，用简洁的关键词或短语"}}},
+                    {"top_k", {{"type", "integer"}, {"description", "返回的最相关结果数，默认5，最多10"}}}
+                }},
+                {"required", json::array({"query"})}
+            }}
+        }}
+    };
+    json arr = json::array();
+    if (memoryEnabled) arr.push_back(searchMemory);
+    if (webEnabled) arr.push_back(webSearch);
+    return arr;
 }
 
 struct ToolExecResult {
@@ -765,6 +785,228 @@ static ToolExecResult runSearchMemoryTool(const json& args, const std::string& s
     return r;
 }
 
+// URL encoding for search query
+static std::string urlEncode(const std::string& s) {
+    const char* hex = "0123456789ABCDEF";
+    std::string encoded;
+    for (char c : s) {
+        if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~')
+            encoded += c;
+        else {
+            encoded += '%';
+            encoded += hex[(unsigned char)c >> 4];
+            encoded += hex[(unsigned char)c & 0x0F];
+        }
+    }
+    return encoded;
+}
+
+// HTML entity decode
+static std::string htmlDecode(const std::string& s) {
+    std::string result = s;
+    size_t pos = 0;
+    while ((pos = result.find("&amp;", pos)) != std::string::npos) {
+        result.replace(pos, 5, "&");
+        pos += 1;
+    }
+    pos = 0;
+    while ((pos = result.find("&lt;", pos)) != std::string::npos) {
+        result.replace(pos, 4, "<");
+        pos += 1;
+    }
+    pos = 0;
+    while ((pos = result.find("&gt;", pos)) != std::string::npos) {
+        result.replace(pos, 4, ">");
+        pos += 1;
+    }
+    pos = 0;
+    while ((pos = result.find("&quot;", pos)) != std::string::npos) {
+        result.replace(pos, 6, "\"");
+        pos += 1;
+    }
+    return result;
+}
+
+// Strip HTML tags from a string
+static std::string stripTags(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    bool inTag = false;
+    for (char ch : s) {
+        if (ch == '<') inTag = true;
+        else if (ch == '>') inTag = false;
+        else if (!inTag) out += ch;
+    }
+    return out;
+}
+
+// Execute web_search: Bing HTML -> parse results -> formatted text
+static ToolExecResult runWebSearchTool(const json& args) {
+    ToolExecResult r;
+    if (args.contains("query") && args["query"].is_string())
+        r.query = args["query"].get<std::string>();
+    
+    int topK = 5;
+    if (args.contains("top_k")) {
+        if (args["top_k"].is_number()) topK = args["top_k"].get<int>();
+        else if (args["top_k"].is_string()) { try { topK = std::stoi(args["top_k"].get<std::string>()); } catch (...) {} }
+    }
+    if (topK < 1) topK = 1;
+    if (topK > 10) topK = 10;
+    
+    if (r.query.empty()) {
+        r.content = "错误：搜索查询词不能为空。";
+        return r;
+    }
+    
+    std::string encodedQuery = urlEncode(r.query);
+    
+    HINTERNET hSession = nullptr;
+    HINTERNET hConnect = nullptr;
+    HINTERNET hRequest = nullptr;
+    
+    auto cleanup = [&]() {
+        if (hRequest) WinHttpCloseHandle(hRequest);
+        if (hConnect) WinHttpCloseHandle(hConnect);
+        if (hSession) WinHttpCloseHandle(hSession);
+    };
+    
+    hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                           WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, 
+                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) {
+        r.content = "错误：无法初始化 WinHTTP 会话。";
+        return r;
+    }
+    
+    DWORD timeout = 10000;
+    WinHttpSetOption(hSession, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+    WinHttpSetOption(hSession, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+    
+    hConnect = WinHttpConnect(hSession, L"www.bing.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!hConnect) {
+        cleanup();
+        r.content = "错误：无法连接到搜索服务器。";
+        return r;
+    }
+    
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, encodedQuery.c_str(), (int)encodedQuery.size(), nullptr, 0);
+    std::wstring wQuery(wlen, 0);
+    if (wlen > 0)
+        MultiByteToWideChar(CP_UTF8, 0, encodedQuery.c_str(), (int)encodedQuery.size(), &wQuery[0], wlen);
+    std::wstring path = L"/search?q=" + wQuery + L"&setlang=zh-CN";
+    
+    hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), nullptr, 
+                                  WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 
+                                  WINHTTP_FLAG_SECURE);
+    if (!hRequest) {
+        cleanup();
+        r.content = "错误：无法创建搜索请求。";
+        return r;
+    }
+    
+    const wchar_t* extraHeaders = L"Accept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\nAccept: text/html,application/xhtml+xml";
+    WinHttpAddRequestHeaders(hRequest, extraHeaders, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
+    
+    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, 
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        cleanup();
+        r.content = "错误：发送搜索请求失败。";
+        return r;
+    }
+    
+    if (!WinHttpReceiveResponse(hRequest, nullptr)) {
+        cleanup();
+        r.content = "错误：未收到搜索响应。";
+        return r;
+    }
+    
+    std::string html;
+    DWORD dwSize = 0;
+    do {
+        dwSize = 0;
+        if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
+        if (dwSize == 0) break;
+        
+        std::vector<char> buffer(dwSize + 1);
+        DWORD dwDownloaded = 0;
+        if (!WinHttpReadData(hRequest, buffer.data(), dwSize, &dwDownloaded)) break;
+        buffer[dwDownloaded] = '\0';
+        html.append(buffer.data(), dwDownloaded);
+    } while (dwSize > 0);
+    
+    cleanup();
+    
+    if (html.empty()) {
+        r.content = "错误：搜索结果为空。";
+        return r;
+    }
+    
+    std::string results;
+    int count = 0;
+    size_t pos = 0;
+    const std::string marker = "<li class=\"b_algo\"";
+    while (count < topK && (pos = html.find(marker, pos)) != std::string::npos) {
+        size_t blockEnd = html.find(marker, pos + marker.size());
+        if (blockEnd == std::string::npos) blockEnd = html.size();
+        std::string block = html.substr(pos, blockEnd - pos);
+        
+        // 标题与链接：<h2><a href="URL">TITLE</a></h2>
+        size_t h2 = block.find("<h2");
+        if (h2 == std::string::npos) { pos = blockEnd; continue; }
+        size_t aStart = block.find("<a", h2);
+        if (aStart == std::string::npos) { pos = blockEnd; continue; }
+        size_t hrefAttr = block.find("href=\"", aStart);
+        if (hrefAttr == std::string::npos) { pos = blockEnd; continue; }
+        hrefAttr += 6;
+        size_t hrefEnd = block.find("\"", hrefAttr);
+        if (hrefEnd == std::string::npos) { pos = blockEnd; continue; }
+        std::string url = block.substr(hrefAttr, hrefEnd - hrefAttr);
+        if (url.compare(0, 4, "http") != 0) { pos = blockEnd; continue; }
+        
+        size_t titleOpen = block.find(">", hrefEnd);
+        if (titleOpen == std::string::npos) { pos = blockEnd; continue; }
+        titleOpen++;
+        size_t titleClose = block.find("</a>", titleOpen);
+        if (titleClose == std::string::npos) { pos = blockEnd; continue; }
+        std::string title = stripTags(htmlDecode(block.substr(titleOpen, titleClose - titleOpen)));
+        
+        // 摘要：<div class="b_caption">...<p>...</p>
+        std::string snippet;
+        size_t cap = block.find("b_caption");
+        if (cap != std::string::npos) {
+            size_t p = block.find("<p", cap);
+            if (p != std::string::npos) {
+                size_t pOpen = block.find(">", p);
+                if (pOpen != std::string::npos) {
+                    pOpen++;
+                    size_t pClose = block.find("</p>", pOpen);
+                    if (pClose != std::string::npos)
+                        snippet = stripTags(htmlDecode(block.substr(pOpen, pClose - pOpen)));
+                }
+            }
+        }
+        
+        count++;
+        results += "[" + std::to_string(count) + "] " + title + "\n";
+        if (!snippet.empty()) {
+            results += "    " + snippet + "\n";
+        }
+        results += "来源: " + url + "\n\n";
+        
+        pos = blockEnd;
+    }
+    
+    if (count == 0) {
+        r.content = "未找到相关搜索结果。";
+        return r;
+    }
+    
+    r.count = count;
+    r.content = "联网搜索到 " + std::to_string(count) + " 条结果：\n\n" + results;
+    return r;
+}
+
 // ============ API 处理 ============
 struct StreamResult {
     std::string full_content;
@@ -782,6 +1024,7 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
     // 先复制配置，然后立即释放锁
     std::string apiUrl, apiKey, model;
     bool toolsEnabled;
+    bool memEnabled = false;
     {
         std::lock_guard<std::mutex> lock(g_config_mutex);
         apiUrl = g_config.api_url;
@@ -789,8 +1032,10 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
         // 有图片时使用视觉模型
         model = (!imageBase64.empty() && !g_config.vision_model.empty()) 
                 ? g_config.vision_model : g_config.model;
-        // 记忆检索工具：仅在开启记忆且非图片场景启用（视觉模型通常不支持工具调用）
-        toolsEnabled = g_config.memory_enabled && imageBase64.empty();
+        // 工具暴露相互独立：search_memory 由记忆开关控制，web_search 由前端联网开关控制；
+        // 任一启用且非图片场景即可开启 agentic 工具调用（视觉模型通常不支持工具调用）
+        memEnabled = g_config.memory_enabled;
+        toolsEnabled = (memEnabled || webSearch) && imageBase64.empty();
     }
     
     // agentic 循环：最多 MAX_TOOL_ROUNDS 轮工具调用，其后强制生成文本答案
@@ -806,10 +1051,10 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
         liboai::Conversation conversation;
         std::string sysPrompt = g_system_prompt;
         if (webSearch) {
-            sysPrompt += "\n（当前已开启联网搜索，请结合最新网络信息回答，并注明信息时效性。）";
+            sysPrompt += "\n（已开启联网搜索：当问题涉及新闻、时事、天气、股价、体育赛况、人物或事件的最新动态等需要实时信息时，应优先调用 web_search 工具获取最新资料，再据此作答并注明信息时效性。）";
         }
-        if (toolsEnabled) {
-            sysPrompt += "\n（你可以调用 search_memory 工具检索用户的历史对话记忆；当问题可能涉及以往聊过的内容、用户偏好或历史决定时，应先检索再作答。）";
+        if (memEnabled) {
+            sysPrompt += "\n（你可以调用 search_memory 工具检索用户的历史对话记忆，但仅当问题涉及以往聊过的内容、用户偏好或历史决定时才使用；纯实时/新闻类问题无需检索记忆。）";
         }
         (void)conversation.SetSystemData(sysPrompt);
         
@@ -850,7 +1095,7 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
         // 每轮：流式请求模型 → 解析内容增量与 tool_calls 增量 →
         //   若模型请求调用工具，则执行工具、把 assistant(tool_calls) 与 tool 结果
         //   追加进会话，再次请求；否则本轮内容即最终答案，退出循环。
-        json tools = toolsEnabled ? buildToolsSchema() : json();
+        json tools = toolsEnabled ? buildToolsSchema(memEnabled, webSearch) : json();
         std::string finalContent;      // 最终回答（用于写回会话历史）
         std::string lastResponseContent; // 最后一次响应体（兜底解析用）
 
@@ -967,8 +1212,14 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
 
             if (g_stop_requested.load()) { finalContent = roundContent; break; }
 
-            // 本轮没有工具调用 → roundContent 即最终答案
-            if (toolCalls.empty()) { finalContent = roundContent; break; }
+            // 本轮没有工具调用：有文本即为最终答案。
+            // 若文本也为空（thinking 模型偶尔某轮只产出 reasoning token，或网关在大上下文下
+            // 返回空响应），不能就此 break，否则会把空内容当答案、用户看到"检索到N条后无输出"。
+            // 继续下一轮；到达 MAX_TOOL_ROUNDS 时 allowTools 关闭，强制模型产出文本。
+            if (toolCalls.empty()) {
+                if (!roundContent.empty()) { finalContent = roundContent; break; }
+                continue;
+            }
 
             // 有工具调用：先把 assistant(tool_calls) 消息追加进会话
             auto& msgs = const_cast<json&>(conversation.GetJSON())["messages"];
@@ -1016,6 +1267,9 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
                 if (fnName == "search_memory") {
                     ToolExecResult tr = runSearchMemoryTool(argsJson, sessionId);
                     toolContent = tr.content; hitCount = tr.count; vecUsed = tr.vector_used; query = tr.query;
+                } else if (fnName == "web_search") {
+                    ToolExecResult tr = runWebSearchTool(argsJson);
+                    toolContent = tr.content; hitCount = tr.count; query = tr.query;
                 } else {
                     toolContent = "未知工具: " + fnName;
                 }
@@ -1039,6 +1293,51 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
 
             finalContent = roundContent;  // 保底：若后续未产出文本，用本轮内容
             // 进入下一轮，把工具结果交回模型
+        }
+
+        // 安全网：agentic 循环结束仍无文本内容（模型多轮只产出 thinking token / 空响应），
+        // 强制再发起一次"不带工具"的请求，让模型基于已有的工具结果直接作答，确保用户总能拿到答案。
+        if (finalContent.empty() && result.error.empty() && !g_stop_requested.load()) {
+            std::string fbContent;
+            std::string fbBuffer;
+            auto fbCallback = [&](std::string data, intptr_t, liboai::Conversation&) -> bool {
+                if (g_stop_requested.load()) return false;
+                fbBuffer += data;
+                size_t p;
+                while ((p = fbBuffer.find('\n')) != std::string::npos) {
+                    std::string line = fbBuffer.substr(0, p);
+                    fbBuffer.erase(0, p + 1);
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    if (line.empty() || line.find("[DONE]") != std::string::npos) continue;
+                    std::string js;
+                    if (line.size() > 6 && line.compare(0, 6, "data: ") == 0) js = line.substr(6);
+                    else if (line.size() > 5 && line.compare(0, 5, "data:") == 0) js = line.substr(5);
+                    else continue;
+                    try {
+                        auto j = json::parse(js);
+                        if (j.contains("choices") && j["choices"].is_array() && !j["choices"].empty()) {
+                            auto& ch = j["choices"][0];
+                            if (ch.contains("delta") && ch["delta"].is_object()
+                                && ch["delta"].contains("content") && ch["delta"]["content"].is_string()) {
+                                std::string d = ch["delta"]["content"].get<std::string>();
+                                if (!d.empty()) {
+                                    fbContent += d;
+                                    json ev; ev["delta"] = d;
+                                    sendSseEvent(sock, safeDump(ev));
+                                }
+                            }
+                        }
+                    } catch (...) {}
+                }
+                return true;
+            };
+            try {
+                openai.ChatCompletion->create(
+                    model, conversation, std::nullopt, 0.7f, std::nullopt, std::nullopt,
+                    fbCallback, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                    std::nullopt, std::nullopt, std::optional<json>(std::nullopt));
+                finalContent = fbContent;
+            } catch (...) {}
         }
 
         result.full_content = finalContent;
