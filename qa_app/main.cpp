@@ -1370,7 +1370,7 @@ StreamResult callLLMStream(const std::vector<Message>& history, const std::strin
 class HttpServer {
 public:
     HttpServer(int port, const std::string& webDir) 
-        : port_(port), webDir_(webDir), running_(false) {}
+        : port_(port), webDir_(webDir), running_(false), poolShutdown_(true) {}
     
     bool start() {
 #ifdef _WIN32
@@ -1401,13 +1401,14 @@ public:
             return false;
         }
         
-        if (listen(serverSock_, 10) < 0) {
+        if (listen(serverSock_, 128) < 0) {
             std::cerr << "监听失败" << std::endl;
             CLOSE_SOCKET(serverSock_);
             return false;
         }
         
         running_ = true;
+        initThreadPool();
         serverThread_ = std::thread([this]() { acceptLoop(); });
         return true;
     }
@@ -1416,6 +1417,7 @@ public:
         running_ = false;
         CLOSE_SOCKET(serverSock_);
         if (serverThread_.joinable()) serverThread_.join();
+        shutdownThreadPool();
 #ifdef _WIN32
         WSACleanup();
 #endif
@@ -1435,9 +1437,9 @@ private:
             socket_t clientSock = accept(serverSock_, (struct sockaddr*)&clientAddr, &clientLen);
             if (clientSock == INVALID_SOCK) continue;
             
-            std::thread([this, clientSock]() {
+            submitTask([this, clientSock]() {
                 handleClient(clientSock);
-            }).detach();
+            });
         }
     }
     
@@ -1944,6 +1946,52 @@ private:
     std::atomic<bool> running_;
     socket_t serverSock_;
     std::thread serverThread_;
+    
+    // Thread pool for handling client connections
+    static const int THREAD_POOL_SIZE = 64;
+    std::vector<std::thread> workerThreads_;
+    std::deque<std::function<void()>> taskQueue_;
+    std::mutex queueMutex_;
+    std::condition_variable queueCV_;
+    std::atomic<bool> poolShutdown_;
+    
+    void initThreadPool() {
+        poolShutdown_ = false;
+        for (int i = 0; i < THREAD_POOL_SIZE; ++i) {
+            workerThreads_.emplace_back([this]() {
+                while (true) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex_);
+                        queueCV_.wait(lock, [this]() {
+                            return !taskQueue_.empty() || poolShutdown_.load();
+                        });
+                        if (poolShutdown_.load() && taskQueue_.empty()) return;
+                        task = std::move(taskQueue_.front());
+                        taskQueue_.pop_front();
+                    }
+                    task();
+                }
+            });
+        }
+    }
+    
+    void submitTask(std::function<void()> task) {
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            taskQueue_.push_back(std::move(task));
+        }
+        queueCV_.notify_one();
+    }
+    
+    void shutdownThreadPool() {
+        poolShutdown_ = true;
+        queueCV_.notify_all();
+        for (auto& t : workerThreads_) {
+            if (t.joinable()) t.join();
+        }
+        workerThreads_.clear();
+    }
 };
 
 // ============ 全局状态 ============
