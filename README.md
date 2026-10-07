@@ -1,6 +1,6 @@
-# LLM Stream QA — C++ 大语言模型流式问答系统
+# Agentic Stream QA — 流式智能体问答系统
 
-基于 C++17 与 [liboai](https://github.com/D7EAD/liboai) 的轻量级流式问答系统：C++ 手写 HTTP 服务器 + SSE 流式推送，支持多厂商模型切换、图片多模态识别、多会话管理、**Agentic RAG 记忆检索**与**联网搜索**（二者均作为工具由模型自主调用），最终打包为免安装的 Windows 桌面应用。
+基于 C++ 与 [liboai](https://github.com/D7EAD/liboai) 的轻量级流式问答系统：C++ 手写 HTTP 服务器 + SSE 流式推送，支持多厂商模型切换、图片多模态识别、多会话管理、**Agentic RAG 记忆检索**与**联网搜索**（二者均作为工具由模型自主调用），最终打包为免安装的 Windows 桌面应用。
 
 ## 功能特性
 
